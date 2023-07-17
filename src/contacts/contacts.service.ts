@@ -1,4 +1,9 @@
-import { BadRequestException, HttpException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LinkPrecedenceType } from 'src/utils/enums';
 import {
@@ -19,7 +24,7 @@ export class ContactsService {
 
   private findByEmail(email: string) {
     try {
-      return this.contactRepository.find({
+      return this.contactRepository.findOne({
         where: {
           email: email,
           deletedAt: IsNull(),
@@ -31,9 +36,27 @@ export class ContactsService {
       throw new Error('Error occured while finding contact via email');
     }
   }
-  private findByPhone(phone: string) {
+
+  private findByPrimaryContact(primaryContactId: number) {
     try {
       return this.contactRepository.find({
+        where: {
+          linked: {
+            id: primaryContactId,
+          },
+          deletedAt: IsNull(),
+        },
+        relations: ['linked'],
+      });
+    } catch (err) {
+      console.error(err);
+      throw new Error('Error occured while finding contact via email');
+    }
+  }
+
+  private findByPhone(phone: string) {
+    try {
+      return this.contactRepository.findOne({
         where: {
           phoneNumber: phone,
           deletedAt: IsNull(),
@@ -54,12 +77,12 @@ export class ContactsService {
     return this.contactRepository.save(contacts);
   }
 
-  private getPrimaryContact(contacts: Contact[]) {
-    let primaryContact = contacts.filter(
-      (contact) => contact.linkPrecedence === LinkPrecedenceType.Primary,
-    );
-    if (!primaryContact.length) {
-      return [contacts[0].linked];
+  private getPrimaryContact(contact: Contact) {
+    let primaryContact =
+      contact.linkPrecedence === LinkPrecedenceType.Primary ? contact : null;
+
+    if (!primaryContact) {
+      return contact.linked;
     } else return primaryContact;
   }
 
@@ -72,81 +95,59 @@ export class ContactsService {
       }
       const contactsByEmailPromise = identifyContactDto.email
         ? this.findByEmail(identifyContactDto.email)
-        : Promise.resolve([]);
+        : Promise.resolve(null);
       const contactsByPhonePromise = identifyContactDto.phoneNumber
         ? this.findByPhone(identifyContactDto.phoneNumber)
-        : Promise.resolve([]);
+        : Promise.resolve(null);
 
-      const [contactsByEmail, contactsByPhone] = await Promise.all([
+      const [contactsByEmail, contactsByPhone]: Contact[] = await Promise.all([
         contactsByEmailPromise,
         contactsByPhonePromise,
       ]);
-      console.log({ contactsByEmail, contactsByPhone });
-
-      const hasContactsByEmail = contactsByEmail.length;
-      const hasContactsByPhone = contactsByPhone.length;
-
-      if (!hasContactsByEmail && !hasContactsByPhone) {
-        return this.createPrimaryContact(identifyContactDto);
+      let primaryContact: Contact;
+      if (!contactsByEmail && !contactsByPhone) {
+        primaryContact = await this.createPrimaryContact(identifyContactDto);
       } else if (
-        (hasContactsByEmail &&
-          !hasContactsByPhone &&
+        (contactsByEmail &&
+          !contactsByPhone &&
           identifyContactDto.phoneNumber) ||
-        (hasContactsByPhone && !hasContactsByEmail && identifyContactDto.email)
+        (contactsByPhone && !contactsByEmail && identifyContactDto.email)
       ) {
-        return this.createSecondaryContact(
-          identifyContactDto,
-          contactsByEmail,
-          contactsByPhone,
-        );
-      } else if (hasContactsByEmail && hasContactsByPhone) {
-        const primaryContactByEmail = this.getPrimaryContact(contactsByEmail);
-        const primaryContactByPhone = this.getPrimaryContact(contactsByPhone);
-        console.log({ primaryContactByEmail, primaryContactByPhone });
-
-        if (
-          primaryContactByEmail.length &&
-          primaryContactByPhone.length &&
-          primaryContactByEmail[0]['id'] !== primaryContactByPhone[0]['id']
-        ) {
-          const primaryContact = await this.changePrimaryContact(
-            primaryContactByEmail[0],
-            primaryContactByPhone[0],
-            [...contactsByEmail, ...contactsByPhone],
-          );
-          return this.mergeContacts(
-            [...contactsByEmail, ...contactsByPhone],
-            primaryContact,
-          );
-        } else {
-          const primaryContact = primaryContactByEmail.length
-            ? primaryContactByEmail[0]
-            : primaryContactByPhone[0];
-          return this.mergeContacts(
-            [...contactsByEmail, ...contactsByPhone],
-            primaryContact,
-          );
-        }
-      } else if (hasContactsByEmail || hasContactsByPhone) {
-        const existingContacts = contactsByEmail.length
+        const existingContact = contactsByEmail
           ? contactsByEmail
           : contactsByPhone;
-        const primaryContact = this.getPrimaryContact(existingContacts);
-        let { emails, phoneNumbers, secondaryContactIds } =
-          this.prepareIdentifyPayload(
-            contactsByEmail,
-            contactsByPhone,
-            primaryContact,
+        primaryContact = this.getPrimaryContact(existingContact);
+        await this.createSecondaryContact(identifyContactDto, primaryContact);
+      } else if (contactsByEmail && contactsByPhone) {
+        const primaryContactByEmail = this.getPrimaryContact(contactsByEmail);
+        const primaryContactByPhone = this.getPrimaryContact(contactsByPhone);
+        if (
+          primaryContactByEmail &&
+          primaryContactByPhone &&
+          primaryContactByEmail['id'] !== primaryContactByPhone['id']
+        ) {
+          primaryContact = await this.changePrimaryContact(
+            primaryContactByEmail,
+            primaryContactByPhone,
           );
-
-        const identifiedContact: IdentifyContactResponseDto = {
-          primaryContatctId: primaryContact[0]['id'],
-          emails: emails,
-          phoneNumbers: phoneNumbers,
-          secondaryContactIds: secondaryContactIds,
-        };
-        return identifiedContact;
+        } else {
+          primaryContact = primaryContactByEmail
+            ? primaryContactByEmail
+            : primaryContactByPhone;
+        }
+      } else if (contactsByEmail || contactsByPhone) {
+        const existingContacts = contactsByEmail
+          ? contactsByEmail
+          : contactsByPhone;
+        primaryContact = this.getPrimaryContact(existingContacts);
       }
+      if (!primaryContact) {
+        throw new NotFoundException('No Contacts found');
+      }
+      let secondaryContacts = await this.findByPrimaryContact(
+        primaryContact.id,
+      );
+      return this.prepareIdentifyPayload(secondaryContacts, primaryContact);
     } catch (err) {
       console.error(err);
       if (err.status) throw err;
@@ -154,56 +155,34 @@ export class ContactsService {
     }
   }
 
-  private prepareIdentifyPayload(
-    contactsByEmail: any[],
-    contactsByPhone: any[],
-    primaryContact: Contact[],
-  ) {
-    let emails = [];
-    let phoneNumbers = [];
-    let secondaryContactIds = getUniqueValuesFromObjectArray(
-      [...contactsByEmail, ...contactsByPhone],
-      'id',
-    );
-    secondaryContactIds.splice(
-      secondaryContactIds.indexOf(primaryContact[0]['id']),
-      1,
-    );
-
-    if (contactsByEmail.length) {
-      emails = getUniqueValuesFromObjectArray(contactsByEmail, 'email');
-      findAndUnshiftElement(emails, primaryContact[0]['email']);
+  private prepareIdentifyPayload(contacts: Contact[], primaryContact: Contact) {
+    let emails = getUniqueValuesFromObjectArray(contacts, 'email');
+    if (primaryContact.email) {
+      emails.push(primaryContact.email);
+      findAndUnshiftElement(emails, primaryContact.email);
     }
-    if (contactsByPhone.length) {
-      phoneNumbers = getUniqueValuesFromObjectArray(
-        contactsByPhone,
-        'phoneNumber',
-      );
-      findAndUnshiftElement(phoneNumbers, primaryContact[0]['phoneNumber']);
+    let phoneNumbers = getUniqueValuesFromObjectArray(contacts, 'phoneNumber');
+    if (primaryContact.phoneNumber) {
+      phoneNumbers.push(primaryContact.phoneNumber);
+      findAndUnshiftElement(phoneNumbers, primaryContact.phoneNumber);
     }
-    return { emails, phoneNumbers, secondaryContactIds };
+    let secondaryContactIds = getUniqueValuesFromObjectArray(contacts, 'id');
+    const identifiedContact: IdentifyContactResponseDto = {
+      primaryContatctId: primaryContact.id,
+      emails: emails,
+      phoneNumbers: phoneNumbers,
+      secondaryContactIds: secondaryContactIds,
+    };
+    return identifiedContact;
   }
 
-  private async createPrimaryContact(
-    identifyContactDto: IdentifyContactDto,
-  ): Promise<IdentifyContactResponseDto> {
+  private async createPrimaryContact(identifyContactDto: IdentifyContactDto) {
     try {
       const primaryContactPayload = this.contactRepository.create({
         email: identifyContactDto.email,
         phoneNumber: identifyContactDto.phoneNumber,
       });
-      const primaryContact = await this.saveContact(primaryContactPayload);
-
-      const identifiedContact: IdentifyContactResponseDto = {
-        primaryContatctId: primaryContact.id,
-        emails: primaryContact.email ? [primaryContact.email] : [],
-        phoneNumbers: primaryContact.phoneNumber
-          ? [primaryContact.phoneNumber]
-          : [],
-        secondaryContactIds: [],
-      };
-
-      return identifiedContact;
+      return await this.saveContact(primaryContactPayload);
     } catch (err) {
       console.error(err);
       throw new Error('Error occured while creating Primary contact');
@@ -212,37 +191,16 @@ export class ContactsService {
 
   private async createSecondaryContact(
     identifyContactDto: IdentifyContactDto,
-    contactsByEmail: Contact[],
-    contactsByPhone: Contact[], // : Promise<IdentifyContactResponseDto>
+    primaryContact: Contact,
   ) {
     try {
-      const existingContacts = contactsByEmail.length
-        ? contactsByEmail
-        : contactsByPhone;
-      console.log(existingContacts);
-
-      const primaryContact = this.getPrimaryContact(existingContacts);
       const secondaryContactPayload = this.contactRepository.create({
         email: identifyContactDto.email,
         phoneNumber: identifyContactDto.phoneNumber,
-        linked: primaryContact[0],
+        linked: primaryContact,
         linkPrecedence: LinkPrecedenceType.Secondary,
       });
-      const secondaryContact = await this.saveContact(secondaryContactPayload);
-      let { emails, phoneNumbers, secondaryContactIds } =
-        this.prepareIdentifyPayload(
-          contactsByEmail,
-          contactsByPhone,
-          primaryContact,
-        );
-      const identifiedContact: IdentifyContactResponseDto = {
-        primaryContatctId: primaryContact[0]['id'],
-        emails: [...emails, identifyContactDto.email],
-        phoneNumbers: [...phoneNumbers, identifyContactDto.phoneNumber],
-        secondaryContactIds: [...secondaryContactIds, secondaryContact.id],
-      };
-
-      return identifiedContact;
+      return await this.saveContact(secondaryContactPayload);
     } catch (err) {
       console.error(err);
       throw new Error('Error occured while creating secondary contact');
@@ -252,43 +210,30 @@ export class ContactsService {
   private async changePrimaryContact(
     primaryContactA: Contact,
     primaryContactB: Contact,
-    contacts: Contact[],
   ) {
     try {
-      let earliestPrimaryContact =
-        primaryContactA.createdAt > primaryContactB.createdAt
-          ? primaryContactA
-          : primaryContactB;
-      let updateContactPayload = contacts.filter((contact) => {
-        if (contact.linked.id !== earliestPrimaryContact.id) {
-          contact.linkPrecedence = LinkPrecedenceType.Secondary;
-          contact.linked = earliestPrimaryContact;
-          return true;
-        } else return false;
+      let selectedPrimaryContact: Contact, rejectedPrimaryContact: Contact;
+      if (primaryContactA.createdAt < primaryContactB.createdAt) {
+        selectedPrimaryContact = primaryContactA;
+        rejectedPrimaryContact = primaryContactB;
+      } else {
+        selectedPrimaryContact = primaryContactB;
+        rejectedPrimaryContact = primaryContactA;
+      }
+      const contacts = await this.findByPrimaryContact(
+        rejectedPrimaryContact.id,
+      );
+      contacts.push(rejectedPrimaryContact);
+      let updateContactPayload = contacts.map((contact) => {
+        contact.linkPrecedence = LinkPrecedenceType.Secondary;
+        contact.linked = selectedPrimaryContact;
+        return contact;
       });
       await this.bulkSaveContact(updateContactPayload);
-      return earliestPrimaryContact;
+      return selectedPrimaryContact;
     } catch (err) {
       console.error(err);
       throw new Error('Error occured while changing Primary Contact');
     }
-  }
-  private async mergeContacts(contacts: Contact[], primaryContact: Contact) {
-    let emails = getUniqueValuesFromObjectArray(contacts, 'email');
-    findAndUnshiftElement(emails, primaryContact.email);
-    let phoneNumbers = getUniqueValuesFromObjectArray(contacts, 'phoneNumber');
-    findAndUnshiftElement(phoneNumbers, primaryContact.phoneNumber);
-    let secondaryContactIds = getUniqueValuesFromObjectArray(contacts, 'id');
-    secondaryContactIds.splice(
-      secondaryContactIds.indexOf(primaryContact['id']),
-      1,
-    );
-    const identifiedContact: IdentifyContactResponseDto = {
-      primaryContatctId: primaryContact['id'],
-      emails: emails,
-      phoneNumbers: phoneNumbers,
-      secondaryContactIds: secondaryContactIds,
-    };
-    return identifiedContact;
   }
 }

@@ -8,7 +8,10 @@ export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}
 
   @Post('identify')
-  identify(@Body() identifyContactDto: IdentifyContactDto) {
+  identify(
+    @Body(new ValidationPipe({ forbidNonWhitelisted: true, whitelist: true }))
+    identifyContactDto: IdentifyContactDto,
+  ) {
     return this.contactsService.identify(identifyContactDto);
   }
 }
