@@ -4,6 +4,17 @@
 
 Node Version 18.15.0
 
+[HOSTED URL] (http://3.110.107.44:3000/contacts/identify)
+
+```curl
+curl --location 'http://3.110.107.44:3000/contacts/identify' \
+--header 'Content-Type: application/json' \
+--header 'X-API-Key: {{token}}' \
+--data-raw '{
+    "email": "hammad@gmail.com",
+    "phoneNumber": "7065"
+}'
+```
 ## Tech Stack
 
 NestJs
