@@ -5,7 +5,7 @@ export function toBool(value: string): boolean {
 export function getUniqueValuesFromObjectArray(array: any[], key: string) {
   let valuesArray = [];
   array.forEach((value) => {
-    valuesArray.push(value[key]);
+    if (value[key]) valuesArray.push(value[key]);
   });
   return Array.from(new Set(valuesArray));
 }
