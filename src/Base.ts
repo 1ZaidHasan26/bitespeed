@@ -1,13 +1,13 @@
 import {
-    CreateDateColumn,
-    DeleteDateColumn,
-    PrimaryGeneratedColumn,
-    UpdateDateColumn,
+  CreateDateColumn,
+  DeleteDateColumn,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 
 export class Base {
-  @PrimaryGeneratedColumn({ type: 'bigint' })
-  id: string;
+  @PrimaryGeneratedColumn({ type: 'int' })
+  id: number;
 
   @CreateDateColumn()
   createdAt: Date;

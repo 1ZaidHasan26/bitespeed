@@ -5,7 +5,7 @@ import { Column, Entity, ManyToOne, OneToMany } from 'typeorm';
 @Entity({ name: 'contacts' })
 export class Contact extends Base {
   @Column({ nullable: true, type: 'varchar' })
-  phone: string;
+  phoneNumber: string;
 
   @Column({ nullable: true, type: 'varchar' })
   email: string;
