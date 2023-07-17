@@ -147,7 +147,7 @@ export class ContactsService {
       let secondaryContacts = await this.findByPrimaryContact(
         primaryContact.id,
       );
-      return this.prepareIdentifyPayload(secondaryContacts, primaryContact);
+      return this.prepareIdentifyResponse(secondaryContacts, primaryContact);
     } catch (err) {
       console.error(err);
       if (err.status) throw err;
@@ -155,7 +155,10 @@ export class ContactsService {
     }
   }
 
-  private prepareIdentifyPayload(contacts: Contact[], primaryContact: Contact) {
+  private prepareIdentifyResponse(
+    contacts: Contact[],
+    primaryContact: Contact,
+  ) {
     let emails = getUniqueValuesFromObjectArray(contacts, 'email');
     if (primaryContact.email) {
       emails.push(primaryContact.email);
