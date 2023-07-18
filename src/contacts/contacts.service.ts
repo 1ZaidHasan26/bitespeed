@@ -176,7 +176,7 @@ export class ContactsService {
       phoneNumbers: phoneNumbers,
       secondaryContactIds: secondaryContactIds,
     };
-    return identifiedContact;
+    return { contact: identifiedContact };
   }
 
   private async createPrimaryContact(identifyContactDto: IdentifyContactDto) {
