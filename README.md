@@ -2,10 +2,13 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript repository for Identity Reconciliation.
 
-Node Version 18.15.0
+**Node Version - 18.15.0**
 
-[HOSTED URL] (http://3.110.107.44:3000/contacts/identify)
+##HOSTED URL
 
+(http://3.110.107.44:3000/contacts/identify)
+
+**Curl example**
 ```curl
 curl --location 'http://3.110.107.44:3000/contacts/identify' \
 --header 'Content-Type: application/json' \
@@ -17,26 +20,21 @@ curl --location 'http://3.110.107.44:3000/contacts/identify' \
 ```
 ## Tech Stack
 
-NestJs
-MySQL
+1. NestJs
+2. MySQL
 
 ## Installation
 
 ```bash
+$ npm install -g yarn
 $ yarn install
 ```
 
 ## Running the app
 
-Create a .env file in the root folder (Take reference from .env.example file)
+1. Create a .env file in the root folder (Take reference from .env.example file)
+2. Run this command to run the application
 
-```bash
-# development
-$ yarn run start
-
-# watch mode
-$ yarn run start:dev
-
-# production mode
-$ yarn run start:prod
-```
+    ```bash
+    $ yarn start
+    ```
